@@ -1,0 +1,6 @@
+{
+  "title": "Recommendation Systems",
+  "description": "End-to-end recommendation system design — candidate generation, ranking, re-ranking, and evaluation",
+  "icon": "RecSys",
+  "sort_order": 3
+}

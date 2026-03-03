@@ -1,0 +1,6 @@
+{
+  "title": "ML Concepts",
+  "description": "Fundamental machine learning theory — loss functions, optimization, regularization, and model evaluation",
+  "icon": "ML",
+  "sort_order": 2
+}

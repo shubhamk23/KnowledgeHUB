@@ -1,0 +1,6 @@
+{
+  "title": "ML Infrastructure",
+  "description": "Production ML systems — data pipelines, model deployment, monitoring, and MLOps",
+  "icon": "Infra",
+  "sort_order": 5
+}
