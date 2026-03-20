@@ -4,6 +4,7 @@ slug: vision-overview
 summary: "From CNNs to Vision Transformers — key architectures, tasks, and techniques in modern computer vision."
 tags: ["CNN", "ViT", "object-detection", "segmentation", "computer-vision", "ResNet", "YOLO"]
 visibility: public
+level: beginner
 ---
 
 # Computer Vision: Overview

@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _create_fts_table():
-    """Create FTS5 virtual table if it doesn't exist."""
+    """Create FTS5 virtual table if it doesn't exist (SQLite only)."""
+    from app.config import settings as _settings
+    if not _settings.is_sqlite:
+        return
     async with AsyncSessionLocal() as db:
         await db.execute(
             text(
@@ -35,6 +38,43 @@ async def _create_fts_table():
             )
         )
         await db.commit()
+
+
+async def _migrate_add_level_column():
+    """Add 'level' column to notes table if it doesn't exist (SQLite only)."""
+    from app.config import settings as _settings
+    if not _settings.is_sqlite:
+        return
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text("PRAGMA table_info(notes)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "level" not in columns:
+            await db.execute(
+                text("ALTER TABLE notes ADD COLUMN level VARCHAR DEFAULT 'beginner'")
+            )
+            await db.commit()
+            logger.info("Migrated: added 'level' column to notes table")
+
+
+async def _run_alembic_migrations():
+    """Run pending Alembic migrations (PostgreSQL only)."""
+    from app.config import settings as _settings
+    if not _settings.is_postgres:
+        return
+    import os
+    import subprocess
+    from pathlib import Path as _Path
+    backend_dir = _Path(__file__).parent.parent
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        cwd=str(backend_dir),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(f"Alembic migration failed:\n{result.stderr}")
+    else:
+        logger.info(f"Alembic migrations applied:\n{result.stdout}")
 
 
 async def _seed_admin_user():
@@ -57,8 +97,13 @@ async def lifespan(app: FastAPI):
     # ── Startup ──
     logger.info("Starting AI Notes Knowledge Hub...")
 
-    await create_tables()
-    await _create_fts_table()
+    if settings.is_postgres:
+        await _run_alembic_migrations()
+    else:
+        await create_tables()
+        await _create_fts_table()
+        await _migrate_add_level_column()
+
     await _seed_admin_user()
 
     async with AsyncSessionLocal() as db:

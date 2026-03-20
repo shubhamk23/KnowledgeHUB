@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.schemas import SearchResponse, SearchResultOut
 
@@ -12,21 +13,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/search", response_model=SearchResponse)
-async def search_notes(
-    q: str = Query(..., min_length=1, max_length=200),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-):
-    if not q.strip():
-        return SearchResponse(results=[], total=0, query=q)
+def _build_pg_search_sql(limit: int, offset: int):
+    """Build tsvector-based search queries for PostgreSQL."""
+    sql = text(
+        """
+        SELECT
+            n.id,
+            n.slug,
+            s.slug AS section_slug,
+            n.title,
+            n.tags,
+            ts_headline(
+                'english',
+                COALESCE(n.summary, '') || ' ' || COALESCE(n.tags, ''),
+                plainto_tsquery('english', :query),
+                'MaxFragments=1,MaxWords=32,MinWords=5,StartSel=<mark>,StopSel=</mark>'
+            ) AS excerpt
+        FROM notes n
+        JOIN sections s ON n.section_id = s.id
+        WHERE n.search_vector @@ plainto_tsquery('english', :query)
+          AND n.visibility = 'public'
+        ORDER BY ts_rank(n.search_vector, plainto_tsquery('english', :query)) DESC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    count_sql = text(
+        """
+        SELECT COUNT(*)
+        FROM notes n
+        WHERE n.search_vector @@ plainto_tsquery('english', :query)
+          AND n.visibility = 'public'
+        """
+    )
+    return sql, count_sql
 
-    # Sanitize query for FTS5 — escape special chars
-    safe_q = q.replace('"', '""').strip()
-    fts_query = f'"{safe_q}"'
 
-    # Search using FTS5 with snippet highlighting
+def _build_sqlite_search_sql(fts_query: str, limit: int, offset: int):
+    """Build FTS5-based search queries for SQLite."""
     sql = text(
         """
         SELECT
@@ -45,7 +68,6 @@ async def search_notes(
         LIMIT :limit OFFSET :offset
         """
     )
-
     count_sql = text(
         """
         SELECT COUNT(*)
@@ -55,10 +77,33 @@ async def search_notes(
           AND n.visibility = 'public'
         """
     )
+    return sql, count_sql
+
+
+@router.get("/search", response_model=SearchResponse)
+async def search_notes(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    if not q.strip():
+        return SearchResponse(results=[], total=0, query=q)
 
     try:
-        rows = await db.execute(sql, {"query": fts_query, "limit": limit, "offset": offset})
-        count_row = await db.execute(count_sql, {"query": fts_query})
+        if settings.is_postgres:
+            sql, count_sql = _build_pg_search_sql(limit, offset)
+            params = {"query": q.strip(), "limit": limit, "offset": offset}
+            count_params = {"query": q.strip()}
+        else:
+            safe_q = q.replace('"', '""').strip()
+            fts_query = f'"{safe_q}"'
+            sql, count_sql = _build_sqlite_search_sql(fts_query, limit, offset)
+            params = {"query": fts_query, "limit": limit, "offset": offset}
+            count_params = {"query": fts_query}
+
+        rows = await db.execute(sql, params)
+        count_row = await db.execute(count_sql, count_params)
         total = count_row.scalar_one()
 
         results = [
@@ -73,8 +118,7 @@ async def search_notes(
             for row in rows
         ]
     except Exception:
-        # FTS5 query parse error — return empty results but log for debugging
-        logger.exception("FTS5 search error for query %r", q)
+        logger.exception("Search error for query %r", q)
         results = []
         total = 0
 

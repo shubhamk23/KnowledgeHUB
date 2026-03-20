@@ -31,6 +31,7 @@ class Note(Base):
     summary = Column(Text, nullable=True)
     tags = Column(Text, default="[]")          # JSON array as TEXT
     visibility = Column(String, default="public")  # 'public' | 'draft'
+    level = Column(String, default="beginner")    # 'beginner' | 'intermediate' | 'advanced'
     file_path = Column(String, nullable=False, unique=True)
     word_count = Column(Integer, default=0)
     read_time = Column(Integer, default=0)     # minutes

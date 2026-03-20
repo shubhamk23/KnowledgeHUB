@@ -47,6 +47,7 @@ class NoteCardOut(BaseModel):
     summary: Optional[str] = None
     tags: List[str] = []
     read_time: int = 0
+    level: str = "beginner"
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -69,6 +70,7 @@ class NoteCreateRequest(BaseModel):
     content: str
     tags: List[str] = Field(default_factory=list)
     visibility: str = "public"
+    level: str = "beginner"
     slug: Optional[str] = None   # auto-generated from title if absent
 
 
@@ -78,6 +80,7 @@ class NoteUpdateRequest(BaseModel):
     content: Optional[str] = None
     tags: Optional[List[str]] = None
     visibility: Optional[str] = None
+    level: Optional[str] = None
     slug: Optional[str] = None
 
 

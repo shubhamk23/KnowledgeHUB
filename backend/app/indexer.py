@@ -63,7 +63,13 @@ async def _upsert_section(db: AsyncSession, folder: Path) -> Optional[int]:
 
 
 async def _upsert_note(db: AsyncSession, md_path: Path, section_id: int, section_slug: str) -> bool:
-    """Parse .md file and upsert note + FTS row. Returns True on success."""
+    """Parse .md file and upsert note row. Returns True on success.
+
+    For SQLite: also maintains the notes_fts virtual table manually.
+    For PostgreSQL: a DB trigger auto-updates the search_vector column.
+    """
+    from app.config import settings
+
     try:
         parsed = parse_note_file(md_path)
     except Exception as e:
@@ -84,6 +90,7 @@ async def _upsert_note(db: AsyncSession, md_path: Path, section_id: int, section
             summary=parsed["summary"],
             tags=tags_json,
             visibility=parsed["visibility"],
+            level=parsed["level"],
             file_path=file_path_str,
             word_count=parsed["word_count"],
             read_time=parsed["read_time"],
@@ -91,20 +98,20 @@ async def _upsert_note(db: AsyncSession, md_path: Path, section_id: int, section
         db.add(note)
         await db.flush()
 
-        # Insert into FTS
-        await db.execute(
-            text(
-                "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
-                "VALUES (:rowid, :title, :content, :tags, :summary)"
-            ),
-            {
-                "rowid": note.id,
-                "title": parsed["title"],
-                "content": parsed["content"],
-                "tags": tags_json,
-                "summary": parsed["summary"] or "",
-            },
-        )
+        if settings.is_sqlite:
+            await db.execute(
+                text(
+                    "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
+                    "VALUES (:rowid, :title, :content, :tags, :summary)"
+                ),
+                {
+                    "rowid": note.id,
+                    "title": parsed["title"],
+                    "content": parsed["content"],
+                    "tags": tags_json,
+                    "summary": parsed["summary"] or "",
+                },
+            )
     else:
         note.slug = parsed["slug"]
         note.section_id = section_id
@@ -112,28 +119,30 @@ async def _upsert_note(db: AsyncSession, md_path: Path, section_id: int, section
         note.summary = parsed["summary"]
         note.tags = tags_json
         note.visibility = parsed["visibility"]
+        note.level = parsed["level"]
         note.word_count = parsed["word_count"]
         note.read_time = parsed["read_time"]
         await db.flush()
 
-        # Update FTS: FTS5 doesn't support ON CONFLICT — delete + re-insert
-        await db.execute(
-            text("DELETE FROM notes_fts WHERE rowid = :rowid"),
-            {"rowid": note.id},
-        )
-        await db.execute(
-            text(
-                "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
-                "VALUES (:rowid, :title, :content, :tags, :summary)"
-            ),
-            {
-                "rowid": note.id,
-                "title": parsed["title"],
-                "content": parsed["content"],
-                "tags": tags_json,
-                "summary": parsed["summary"] or "",
-            },
-        )
+        if settings.is_sqlite:
+            # FTS5 doesn't support ON CONFLICT — delete + re-insert
+            await db.execute(
+                text("DELETE FROM notes_fts WHERE rowid = :rowid"),
+                {"rowid": note.id},
+            )
+            await db.execute(
+                text(
+                    "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
+                    "VALUES (:rowid, :title, :content, :tags, :summary)"
+                ),
+                {
+                    "rowid": note.id,
+                    "title": parsed["title"],
+                    "content": parsed["content"],
+                    "tags": tags_json,
+                    "summary": parsed["summary"] or "",
+                },
+            )
 
     return True
 
@@ -195,15 +204,17 @@ class _WatcherHandler:
                 logger.info(f"Re-indexed: {md_path.name}")
 
     async def _handle_delete(self, path: str):
+        from app.config import settings as _settings
         md_path = Path(path)
         file_path_str = str(md_path.resolve())
         async with self._session_factory() as db:
             result = await db.execute(select(Note).where(Note.file_path == file_path_str))
             note = result.scalar_one_or_none()
             if note:
-                await db.execute(
-                    text("DELETE FROM notes_fts WHERE rowid = :rowid"), {"rowid": note.id}
-                )
+                if _settings.is_sqlite:
+                    await db.execute(
+                        text("DELETE FROM notes_fts WHERE rowid = :rowid"), {"rowid": note.id}
+                    )
                 await db.delete(note)
                 await db.commit()
                 logger.info(f"Removed from index: {md_path.name}")
