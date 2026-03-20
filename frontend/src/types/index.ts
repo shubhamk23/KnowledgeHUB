@@ -16,6 +16,7 @@ export interface NoteCard {
   summary: string | null;
   tags: string[];
   read_time: number;
+  level: string;
   created_at: string;
   updated_at: string | null;
 }
@@ -64,6 +65,7 @@ export interface NoteCreatePayload {
   content: string;
   tags: string[];
   visibility: string;
+  level?: string;
   slug?: string;
 }
 

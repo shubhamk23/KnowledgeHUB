@@ -48,12 +48,16 @@ def parse_note_file(file_path: Path) -> dict:
 
     created_at = post.get("created_at", None)
 
+    level_raw = str(post.get("level", "beginner")).lower().strip()
+    level = level_raw if level_raw in ("beginner", "intermediate", "advanced") else "beginner"
+
     return {
         "title": title,
         "slug": slug,
         "tags": tags,
         "summary": summary,
         "visibility": visibility,
+        "level": level,
         "content": content,
         "word_count": word_count,
         "read_time": read_time,
@@ -68,6 +72,7 @@ def build_frontmatter_string(
     visibility: str,
     summary: Optional[str],
     content: str,
+    level: str = "beginner",
 ) -> str:
     """Build a full .md file string including YAML frontmatter."""
     tags_yaml = ", ".join(f'"{t}"' for t in tags) if tags else ""
@@ -78,6 +83,7 @@ slug: {slug}
 {summary_line}
 tags: [{tags_yaml}]
 visibility: {visibility}
+level: {level}
 ---
 
 {content}

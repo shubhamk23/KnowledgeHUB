@@ -56,6 +56,7 @@ async def admin_list_notes(
                 summary=note.summary,
                 tags=json.loads(note.tags or "[]"),
                 read_time=note.read_time,
+                level=note.level or "beginner",
                 word_count=note.word_count,
                 visibility=note.visibility,
                 content=body,
@@ -99,6 +100,7 @@ async def admin_get_note(
         summary=note.summary,
         tags=json.loads(note.tags or "[]"),
         read_time=note.read_time,
+        level=note.level or "beginner",
         word_count=note.word_count,
         visibility=note.visibility,
         content=body,
@@ -142,6 +144,7 @@ async def admin_create_note(
         visibility=req.visibility,
         summary=summary,
         content=req.content,
+        level=req.level,
     )
 
     file_path = folder / f"{slug}.md"
@@ -157,6 +160,7 @@ async def admin_create_note(
         summary=summary,
         tags=tags_json,
         visibility=req.visibility,
+        level=req.level,
         file_path=str(file_path),
         word_count=word_count,
         read_time=max(1, word_count // 200),
@@ -164,13 +168,14 @@ async def admin_create_note(
     db.add(note)
     await db.flush()
 
-    await db.execute(
-        text(
-            "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
-            "VALUES (:rowid, :title, :content, :tags, :summary)"
-        ),
-        {"rowid": note.id, "title": req.title, "content": req.content, "tags": tags_json, "summary": summary},
-    )
+    if settings.is_sqlite:
+        await db.execute(
+            text(
+                "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
+                "VALUES (:rowid, :title, :content, :tags, :summary)"
+            ),
+            {"rowid": note.id, "title": req.title, "content": req.content, "tags": tags_json, "summary": summary},
+        )
     await db.commit()
     await db.refresh(note)
 
@@ -182,6 +187,7 @@ async def admin_create_note(
         summary=note.summary,
         tags=json.loads(note.tags or "[]"),
         read_time=note.read_time,
+        level=note.level or "beginner",
         word_count=note.word_count,
         visibility=note.visibility,
         content=req.content,
@@ -223,6 +229,7 @@ async def admin_update_note(
     new_content = req.content if req.content is not None else current_content
     new_tags = req.tags if req.tags is not None else json.loads(note.tags or "[]")
     new_visibility = req.visibility if req.visibility is not None else note.visibility
+    new_level = req.level if req.level is not None else (note.level or "beginner")
     new_slug = req.slug if req.slug is not None else note.slug
     new_section_slug = req.section_slug if req.section_slug is not None else current_section_slug
 
@@ -254,6 +261,7 @@ async def admin_update_note(
         visibility=new_visibility,
         summary=new_summary,
         content=new_content,
+        level=new_level,
     )
     new_file_path.write_text(file_content, encoding="utf-8")
 
@@ -269,22 +277,24 @@ async def admin_update_note(
     note.summary = new_summary
     note.tags = tags_json
     note.visibility = new_visibility
+    note.level = new_level
     note.file_path = str(new_file_path)
     note.word_count = word_count
     note.read_time = max(1, word_count // 200)
 
-    # FTS5 doesn't support ON CONFLICT — delete + re-insert
-    await db.execute(
-        text("DELETE FROM notes_fts WHERE rowid = :rowid"),
-        {"rowid": note.id},
-    )
-    await db.execute(
-        text(
-            "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
-            "VALUES (:rowid, :title, :content, :tags, :summary)"
-        ),
-        {"rowid": note.id, "title": new_title, "content": new_content, "tags": tags_json, "summary": new_summary},
-    )
+    if settings.is_sqlite:
+        # FTS5 doesn't support ON CONFLICT — delete + re-insert
+        await db.execute(
+            text("DELETE FROM notes_fts WHERE rowid = :rowid"),
+            {"rowid": note.id},
+        )
+        await db.execute(
+            text(
+                "INSERT INTO notes_fts(rowid, title, content, tags, summary) "
+                "VALUES (:rowid, :title, :content, :tags, :summary)"
+            ),
+            {"rowid": note.id, "title": new_title, "content": new_content, "tags": tags_json, "summary": new_summary},
+        )
     await db.commit()
     await db.refresh(note)
 
@@ -296,6 +306,7 @@ async def admin_update_note(
         summary=note.summary,
         tags=json.loads(note.tags or "[]"),
         read_time=note.read_time,
+        level=note.level or "beginner",
         word_count=note.word_count,
         visibility=note.visibility,
         content=new_content,
@@ -316,8 +327,9 @@ async def admin_delete_note(
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    # Remove from FTS
-    await db.execute(text("DELETE FROM notes_fts WHERE rowid = :rowid"), {"rowid": note.id})
+    # Remove from FTS (SQLite only)
+    if settings.is_sqlite:
+        await db.execute(text("DELETE FROM notes_fts WHERE rowid = :rowid"), {"rowid": note.id})
 
     # Remove file from disk
     try:

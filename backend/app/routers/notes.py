@@ -49,6 +49,7 @@ async def get_note(section_slug: str, note_slug: str, db: AsyncSession = Depends
         summary=note.summary,
         tags=json.loads(note.tags or "[]"),
         read_time=note.read_time,
+        level=note.level or "beginner",
         word_count=note.word_count,
         visibility=note.visibility,
         content=content,

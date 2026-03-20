@@ -71,6 +71,7 @@ async def get_section(section_slug: str, db: AsyncSession = Depends(get_db)):
             summary=n.summary,
             tags=json.loads(n.tags or "[]"),
             read_time=n.read_time,
+            level=n.level or "beginner",
             created_at=n.created_at,
             updated_at=n.updated_at,
         )
